@@ -13,6 +13,7 @@ pub fn register_tools(router_builder: RouterBuilder) -> RouterBuilder {
     router_builder
         .append_dyn("tools/list", tools_list.into_dyn())
         .append_dyn("create_op_return", create_op_return.into_dyn())
+        .append_dyn("check_invoice_status", check_invoice_status.into_dyn())
 }
 
 pub async fn tools_list(_request: Option<ListToolsRequest>) -> HandlerResult<ListToolsResult> {
@@ -30,6 +31,21 @@ pub async fn tools_list(_request: Option<ListToolsRequest>) -> HandlerResult<Lis
                     }
                 },
 				required: vec!["message".to_string()],
+			},
+		},
+		Tool {
+			name: "check_invoice_status".to_string(),
+			description: Some("Checks the payment status of a lightning invoice. Returns the bitcoin transaction ID if the invoice has been paid and the transaction broadcast, 'null' if paid but not yet broadcast, or an error if the invoice has not been paid.".to_string()),
+			input_schema: ToolInputSchema {
+				type_name: "object".to_string(),
+				properties: hashmap! {
+                    "invoice".to_string() => ToolInputSchemaProperty {
+                        type_name: Some("string".to_owned()),
+                        description: Some("The lightning invoice string (e.g. lnbc...) or the payment hash (rHash hex) to check".to_owned()),
+                        enum_values: None,
+                    }
+                },
+				required: vec!["invoice".to_string()],
 			},
 		}],
 		next_cursor: None,
@@ -59,5 +75,31 @@ pub async fn create_op_return(request: CreateOpReturnRequest) -> HandlerResult<C
 	Ok(CallToolResult {
 		is_error: !res.starts_with("lnbc"),
 		content: vec![CallToolResultContent::Text { text: res }],
+	})
+}
+
+#[derive(Deserialize, Serialize, RpcParams)]
+pub struct CheckInvoiceStatusRequest {
+    pub invoice: String,
+}
+
+pub async fn check_invoice_status(request: CheckInvoiceStatusRequest) -> HandlerResult<CallToolResult> {
+	let client = Client::new();
+	let url = format!("https://opreturnbot.com/api/status/{}", request.invoice);
+	let res = client
+		.get(&url)
+		.send()
+		.await
+		.map_err(|_| json!({"code": -32603, "message": "Internal error"}).into_handler_error())?;
+
+	let status = res.status();
+	let body = res
+		.text()
+		.await
+		.map_err(|_| json!({"code": -32603, "message": "Internal error"}).into_handler_error())?;
+
+	Ok(CallToolResult {
+		is_error: !status.is_success(),
+		content: vec![CallToolResultContent::Text { text: body }],
 	})
 }
